@@ -196,7 +196,9 @@ def main():
     if not glfw.init():
         return
 
-    window = glfw.create_window(GL_MAX,GL_MAX, "Paisagem OpenGL", None, None)
+    # abre a janela maximizada (1280x720 é o tamanho ao restaurar)
+    glfw.window_hint(glfw.MAXIMIZED, glfw.TRUE)
+    window = glfw.create_window(1280, 720, "Paisagem OpenGL", None, None)
     if not window:
         glfw.terminate()
         return
