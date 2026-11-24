@@ -4,20 +4,33 @@ import math
 
 from ambiente import *
 from gerador import *
+from colisao import *
+from monstro import Monstro
 
-posicao = [0.0, 1.0, 0.0]   
+TAMANHO_CHAO = 500
+ALTURA_CHAO = 1
+ALTURA_AGUA = ALTURA_CHAO + 1.0
+SENSIBILIDADE = 0.15
+
+ALTURA_MURO = 30
+
+# física
+VEL = 0.5
+VEL_PULO = 1.8
+GRAVIDADE = 0.1
+
+# o boneco nasce na plataforma de saída (-x), olhando para a chegada (+x)
+PONTO_INICIAL = [-TAMANHO_CHAO + LARGURA_PLAT_ES / 2, ALTURA_PLAT_ES, 0.0]
+ROTACAO_INICIAL = -90.0
+
+posicao = list(PONTO_INICIAL)
 velocidade_y = 0.0
-rotacao = 0.0               
+rotacao = ROTACAO_INICIAL
 ultimo_x = None
 item = False
 pulou = False
 pausado = False
-
-TAMANHO_CHAO = 500   
-ALTURA_CHAO = 1
-SENSIBILIDADE = 0.15
-
-ALTURA_MURO = 30
+no_agua = False   
 
 
 def boneco():
@@ -62,10 +75,9 @@ def boneco():
 
     glEnd()
     glPopMatrix()
-    
 
-def tela_pausa():
-    """Escurece a tela e desenha o símbolo de pausa."""
+
+def _tela_2d_inicio():
     glDisable(GL_DEPTH_TEST)
     glEnable(GL_BLEND)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
@@ -76,14 +88,26 @@ def tela_pausa():
     glMatrixMode(GL_MODELVIEW)
     glLoadIdentity()
 
-    # fundo escuro
-    glColor4f(0.0, 0.0, 0.0, 0.55)
+
+def _tela_2d_fim():
+    glDisable(GL_BLEND)
+    glEnable(GL_DEPTH_TEST)
+
+
+def _fundo(r, g, b, a):
+    glColor4f(r, g, b, a)
     glBegin(GL_QUADS)
     glVertex2f(-1, -1)
     glVertex2f(1, -1)
     glVertex2f(1, 1)
     glVertex2f(-1, 1)
     glEnd()
+
+
+def tela_pausa():
+    """Escurece a tela e desenha o símbolo de pausa."""
+    _tela_2d_inicio()
+    _fundo(0.0, 0.0, 0.0, 0.55)
 
     # símbolo de pausa (duas barras)
     glColor4f(1.0, 1.0, 1.0, 1.0)
@@ -99,8 +123,15 @@ def tela_pausa():
     glVertex2f(0.05, 0.2)
     glEnd()
 
-    glDisable(GL_BLEND)
-    glEnable(GL_DEPTH_TEST)
+    _tela_2d_fim()
+
+
+def tela_resultado(cor):
+    """Tinge a tela de vermelho (morreu) ou verde (venceu)."""
+    _tela_2d_inicio()
+    _fundo(cor[0], cor[1], cor[2], 0.5)
+    _tela_2d_fim()
+
 
 def alternar_pausa(window):
     global pausado, ultimo_x
@@ -113,9 +144,11 @@ def alternar_pausa(window):
         glfw.set_window_title(window, "Paisagem OpenGL")
         ultimo_x = None   # evita um "pulo" na rotação ao voltar
 
+
 def tecla_callback(window, key, scancode, action, mods):
     if key == glfw.KEY_ESCAPE and action == glfw.PRESS:
         alternar_pausa(window)
+
 
 def mouse_movimento(window, x, y):
     """Mouse para a direita -> boneco olha para a direita."""
@@ -128,50 +161,80 @@ def mouse_movimento(window, x, y):
     ultimo_x = x
     rotacao -= dx * SENSIBILIDADE
 
-def teclado_movimentacao(window):
-    global velocidade_y, pulou
 
-    vel = 0.5
+def teclado_movimentacao(window, caixas):
+    global velocidade_y, pulou, no_agua
+
     ang = math.radians(rotacao)
     # direção que o boneco está olhando e o lado direito dele
     frente_x, frente_z = -math.sin(ang), -math.cos(ang)
     direita_x, direita_z = math.cos(ang), -math.sin(ang)
 
+    dx = dz = 0.0
     if glfw.get_key(window, glfw.KEY_W) == glfw.PRESS:
-        posicao[0] += frente_x * vel
-        posicao[2] += frente_z * vel
+        dx += frente_x * VEL
+        dz += frente_z * VEL
     if glfw.get_key(window, glfw.KEY_S) == glfw.PRESS:
-        posicao[0] -= frente_x * vel
-        posicao[2] -= frente_z * vel
+        dx -= frente_x * VEL
+        dz -= frente_z * VEL
     if glfw.get_key(window, glfw.KEY_A) == glfw.PRESS:
-        posicao[0] -= direita_x * vel
-        posicao[2] -= direita_z * vel
+        dx -= direita_x * VEL
+        dz -= direita_z * VEL
     if glfw.get_key(window, glfw.KEY_D) == glfw.PRESS:
-        posicao[0] += direita_x * vel
-        posicao[2] += direita_z * vel
+        dx += direita_x * VEL
+        dz += direita_z * VEL
 
+    # --- movimento horizontal com colisão (um eixo por vez, assim ele "desliza" na parede) ---
+    limite = TAMANHO_CHAO - METADE_BONECO   # não deixa sair do mapa
+
+    novo_x = max(-limite, min(limite, posicao[0] + dx))
+    if not colide_lateral(novo_x, posicao[1], posicao[2], caixas):
+        posicao[0] = novo_x
+
+    novo_z = max(-limite, min(limite, posicao[2] + dz))
+    if not colide_lateral(posicao[0], posicao[1], novo_z, caixas):
+        posicao[2] = novo_z
+
+    # --- pulo ---
     if glfw.get_key(window, glfw.KEY_SPACE) == glfw.PRESS and not pulou:
-        velocidade_y = 4
+        velocidade_y = VEL_PULO
         pulou = True
 
-    # gravidade
-    velocidade_y -= 0.1
-    posicao[1] += velocidade_y
+    # --- gravidade + pouso (chão ou topo de plataforma) ---
+    y_anterior = posicao[1]
+    velocidade_y -= GRAVIDADE
+    y_novo = y_anterior + velocidade_y
 
-    # colisão com o topo do chão
-    
-    if posicao[1] <= ALTURA_CHAO:
-        posicao[1] = ALTURA_CHAO
-        velocidade_y = 0.0
-        pulou = False
-    
-    """
-    # não deixa sair do chão
-    limite = TAMANHO_CHAO - 0.5
-    posicao[0] = max(-limite, min(limite, posicao[0]))
-    posicao[2] = max(-limite, min(limite, posicao[2]))
+    if velocidade_y <= 0:   # só pousa quando está caindo
+        suporte = altura_suporte(posicao[0], posicao[2], y_anterior, caixas, ALTURA_CHAO)
+        if y_novo <= suporte:
+            y_novo = suporte
+            velocidade_y = 0.0
+            pulou = False
+            # se pousou no fundo (e não numa plataforma), está dentro da água
+            no_agua = (suporte == ALTURA_CHAO)
 
-    """
+    posicao[1] = y_novo
+
+
+def chegou():
+    """Chegou quando está parado em cima da plataforma de chegada (+x)."""
+    return (not pulou and
+            posicao[0] >= TAMANHO_CHAO - LARGURA_PLAT_ES and
+            posicao[1] >= ALTURA_PLAT_ES - 0.01)
+
+
+def reiniciar(monstro):
+    global velocidade_y, pulou, no_agua, rotacao, ultimo_x
+    posicao[:] = PONTO_INICIAL
+    velocidade_y = 0.0
+    pulou = False
+    no_agua = False
+    rotacao = ROTACAO_INICIAL
+    ultimo_x = None
+    monstro.reposicionar(longe_de=posicao)
+
+
 def mouse_item(window, mouse, action, mods):
     global item
     if pausado or action != glfw.PRESS:
@@ -185,6 +248,7 @@ def mouse_item(window, mouse, action, mods):
         item = False
         print("Soltou o item!")
 
+
 def camera_movimentacao():
     # câmera SEMPRE atrás do boneco, olhando na direção dele
     glTranslatef(0.0, -3.0, -12.0)               # afasta e sobe a câmera
@@ -192,11 +256,12 @@ def camera_movimentacao():
     glRotatef(-rotacao, 0.0, 1.0, 0.0)           # gira junto com o boneco
     glTranslatef(-posicao[0], -posicao[1], -posicao[2])  # segue o boneco
 
+
 def main():
     if not glfw.init():
         return
 
-    window = glfw.create_window(GL_MAX,GL_MAX, "Paisagem OpenGL", None, None)
+    window = glfw.create_window(GL_MAX, GL_MAX, "Paisagem OpenGL", None, None)
     if not window:
         glfw.terminate()
         return
@@ -209,19 +274,41 @@ def main():
     glfw.set_key_callback(window, tecla_callback)
 
     glEnable(GL_DEPTH_TEST)
-    
-    global posicao  # posição inicial do boneco
-    
-    posicao = [TAMANHO_CHAO/2, ALTURA_CHAO, TAMANHO_CHAO/2]  # posição inicial do boneco
-    
-    centros_plataformas = gerar_centros_plataformas(500, TAMANHO_CHAO)  # gera as plataformas de acordo com a dificuldade
 
+    alcance = alcance_pulo(VEL_PULO, GRAVIDADE, VEL)
+    centros_plataformas = gerar_centros_plataformas(500, TAMANHO_CHAO, alcance)
+    caixas = criar_caixas(centros_plataformas, TAMANHO_CHAO)   # caixas de colisão
+
+    monstro = Monstro(TAMANHO_CHAO, ALTURA_CHAO, longe_de=posicao)
+    reiniciar(monstro)
+
+    estado = "jogando"      # "jogando", "morreu" ou "venceu"
+    tempo_fim = 0.0
 
     while not glfw.window_should_close(window):
         glfw.poll_events()
 
         if not pausado:
-            teclado_movimentacao(window)
+            if estado == "jogando":
+                teclado_movimentacao(window, caixas)
+                monstro.atualizar(posicao, no_agua)
+
+                if no_agua and monstro.tocou(posicao):
+                    estado = "morreu"
+                    tempo_fim = glfw.get_time()
+                    glfw.set_window_title(window, "Paisagem OpenGL - O MONSTRO PEGOU VOCÊ!")
+                    print("Você morreu! O monstro te pegou na água.")
+                elif chegou():
+                    estado = "venceu"
+                    tempo_fim = glfw.get_time()
+                    glfw.set_window_title(window, "Paisagem OpenGL - VOCÊ VENCEU!")
+                    print("Você chegou ao final! Parabéns!")
+            else:
+                # mostra o resultado por 2.5s e recomeça
+                if glfw.get_time() - tempo_fim > 2.5:
+                    reiniciar(monstro)
+                    estado = "jogando"
+                    glfw.set_window_title(window, "Paisagem OpenGL")
 
         glClearColor(0.5, 0.8, 1.0, 1.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
@@ -239,27 +326,32 @@ def main():
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
         camera_movimentacao()
-        
-        
+
         chao(TAMANHO_CHAO, ALTURA_CHAO)
         parede(TAMANHO_CHAO, 50)
-        agua(TAMANHO_CHAO, ALTURA_CHAO+ 1.0)
+        agua(TAMANHO_CHAO, ALTURA_AGUA)
         caixa_entrada_saida(TAMANHO_CHAO)
         plataforma_entrada_saida(TAMANHO_CHAO)
-        
+
+        # só desenha as plataformas próximas (mantém o FPS bom com o mapa cheio)
         for centro in centros_plataformas:
-            plataforma(centro, 10, 10, 2.9)
-        
-        
-        
+            if (centro[0] - posicao[0]) ** 2 + (centro[2] - posicao[2]) ** 2 < 350 ** 2:
+                plataforma(centro, TAMANHO_PLATAFORMA, TAMANHO_PLATAFORMA, ALTURA_PLATAFORMA)
+
+        monstro.desenhar()
         boneco()
 
-        if pausado:
+        if estado == "morreu":
+            tela_resultado((0.8, 0.0, 0.0))
+        elif estado == "venceu":
+            tela_resultado((0.0, 0.7, 0.1))
+        elif pausado:
             tela_pausa()
 
         glfw.swap_buffers(window)
 
     glfw.terminate()
+
 
 if __name__ == "__main__":
     main()
