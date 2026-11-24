@@ -14,6 +14,10 @@ SENSIBILIDADE = 0.15
 
 ALTURA_MURO = 30
 
+# câmera em primeira pessoa
+ALTURA_OLHOS = 1.7     # o boneco tem 2 de altura
+LIMITE_PITCH = 89.0    # não deixa a câmera virar de cabeça para baixo
+
 # física
 VEL = 0.5
 VEL_PULO = 1.8
@@ -26,7 +30,10 @@ ROTACAO_INICIAL = -90.0
 posicao = list(PONTO_INICIAL)
 velocidade_y = 0.0
 rotacao = ROTACAO_INICIAL
+inclinacao = 0.0           # positivo = olhando para cima
+primeira_pessoa = True     # a tecla V alterna a câmera
 ultimo_x = None
+ultimo_y = None
 item = False
 pulou = False
 pausado = False
@@ -126,6 +133,20 @@ def tela_pausa():
     _tela_2d_fim()
 
 
+def mira(aspecto):
+    """Pequena cruz no centro da tela (só em primeira pessoa)."""
+    t = 0.02
+    _tela_2d_inicio()
+    glColor4f(1.0, 1.0, 1.0, 0.8)
+    glBegin(GL_LINES)
+    glVertex2f(-t / aspecto, 0)
+    glVertex2f(t / aspecto, 0)
+    glVertex2f(0, -t)
+    glVertex2f(0, t)
+    glEnd()
+    _tela_2d_fim()
+
+
 def tela_resultado(cor):
     """Tinge a tela de vermelho (morreu) ou verde (venceu)."""
     _tela_2d_inicio()
@@ -134,7 +155,7 @@ def tela_resultado(cor):
 
 
 def alternar_pausa(window):
-    global pausado, ultimo_x
+    global pausado, ultimo_x, ultimo_y
     pausado = not pausado
     if pausado:
         glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
@@ -143,23 +164,35 @@ def alternar_pausa(window):
         glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_DISABLED)
         glfw.set_window_title(window, "Paisagem OpenGL")
         ultimo_x = None   # evita um "pulo" na rotação ao voltar
+        ultimo_y = None
 
 
 def tecla_callback(window, key, scancode, action, mods):
+    global primeira_pessoa
     if key == glfw.KEY_ESCAPE and action == glfw.PRESS:
         alternar_pausa(window)
+    elif key == glfw.KEY_V and action == glfw.PRESS and not pausado:
+        primeira_pessoa = not primeira_pessoa
 
 
 def mouse_movimento(window, x, y):
-    """Mouse para a direita -> boneco olha para a direita."""
-    global rotacao, ultimo_x
+    """Mouse para a direita -> olha para a direita; para cima -> olha para cima."""
+    global rotacao, inclinacao, ultimo_x, ultimo_y
     if pausado:
         return
     if ultimo_x is None:
         ultimo_x = x
+        ultimo_y = y
     dx = x - ultimo_x
+    dy = y - ultimo_y
     ultimo_x = x
+    ultimo_y = y
     rotacao -= dx * SENSIBILIDADE
+
+    if primeira_pessoa:
+        # no GLFW o y cresce para baixo
+        inclinacao -= dy * SENSIBILIDADE
+        inclinacao = max(-LIMITE_PITCH, min(LIMITE_PITCH, inclinacao))
 
 
 def teclado_movimentacao(window, caixas):
@@ -225,13 +258,15 @@ def chegou():
 
 
 def reiniciar(monstro):
-    global velocidade_y, pulou, no_agua, rotacao, ultimo_x
+    global velocidade_y, pulou, no_agua, rotacao, inclinacao, ultimo_x, ultimo_y
     posicao[:] = PONTO_INICIAL
     velocidade_y = 0.0
     pulou = False
     no_agua = False
     rotacao = ROTACAO_INICIAL
+    inclinacao = 0.0
     ultimo_x = None
+    ultimo_y = None
     monstro.reposicionar(longe_de=posicao)
 
 
@@ -250,7 +285,14 @@ def mouse_item(window, mouse, action, mods):
 
 
 def camera_movimentacao():
-    # câmera SEMPRE atrás do boneco, olhando na direção dele
+    if primeira_pessoa:
+        # nos olhos do boneco: inversa da orientação e da posição da cabeça
+        glRotatef(-inclinacao, 1.0, 0.0, 0.0)
+        glRotatef(-rotacao, 0.0, 1.0, 0.0)
+        glTranslatef(-posicao[0], -(posicao[1] + ALTURA_OLHOS), -posicao[2])
+        return
+
+    # terceira pessoa: câmera atrás do boneco, olhando na direção dele
     glTranslatef(0.0, -3.0, -12.0)               # afasta e sobe a câmera
     glRotatef(25, 1.0, 0.0, 0.0)                 # inclina olhando pra baixo
     glRotatef(-rotacao, 0.0, 1.0, 0.0)           # gira junto com o boneco
@@ -341,7 +383,10 @@ def main():
                 plataforma(centro, TAMANHO_PLATAFORMA, TAMANHO_PLATAFORMA, ALTURA_PLATAFORMA)
 
         monstro.desenhar()
-        boneco()
+        if not primeira_pessoa:   # em primeira pessoa a câmera está dentro dele
+            boneco()
+        elif estado == "jogando" and not pausado:
+            mira(aspecto)
 
         if estado == "morreu":
             tela_resultado((0.8, 0.0, 0.0))
