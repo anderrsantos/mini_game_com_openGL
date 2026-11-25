@@ -93,7 +93,17 @@ def _tecido():
                               0.72 + 0.15 * ((x // 4 + y // 4) % 2) + 0.13 * grao(x, y))
 
 
-_GERADORES = {"madeira": _madeira, "pedra": _pedra, "terra": _terra,
+def _nuvens():
+    camadas = [(_ruido(11, 4, 4), 0.5), (_ruido(12, 8, 8), 0.28),
+               (_ruido(13, 16, 16), 0.14), (_ruido(14, 32, 32), 0.08)]
+
+    def cor(x, y):                              # branca, com transparência (RGBA)
+        n = sum(r(x, y) * peso for r, peso in camadas)
+        return (255, 255, 255, 255 * max(0.0, min(1.0, (n - 0.48) * 4.5)))
+    return cor
+
+
+_GERADORES = {"nuvens": _nuvens,"madeira": _madeira, "pedra": _pedra, "terra": _terra,
               "agua": _agua, "escamas": _escamas, "tecido": _tecido}
 
 
@@ -104,6 +114,7 @@ def _enviar(cor):
             for c in cor(x, y):
                 dados.append(max(0, min(255, int(c))))
 
+    formato = GL_RGBA if len(dados) == TAM * TAM * 4 else GL_RGB
     tid = glGenTextures(1)
     glBindTexture(GL_TEXTURE_2D, tid)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT)
@@ -113,7 +124,7 @@ def _enviar(cor):
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR)
     glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP, GL_TRUE)
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, TAM, TAM, 0, GL_RGB, GL_UNSIGNED_BYTE, bytes(dados))
+    glTexImage2D(GL_TEXTURE_2D, 0, formato, TAM, TAM, 0, formato,GL_UNSIGNED_BYTE, bytes(dados))
     return tid
 
 

@@ -15,7 +15,12 @@ def _caixa(x0, x1, y0, y1, z0, z1, cor):
 class Monstro:
     TAMANHO = 3.0
     VEL_PASSEIO = 0.15       # velocidade andando pelo mapa
-    VEL_PERSEGUICAO = 2.7   # velocidade quando o jogador está na água (jogador anda a 0.5)
+    # perseguição (o jogador anda a 0.5): de longe ele avança rápido para criar tensão;
+    # de perto desacelera e vai ganhando velocidade, dando tempo de escapar
+    VEL_APROXIMACAO = 2.7
+    DIST_ATAQUE = 60.0
+    VEL_ATAQUE_MIN, VEL_ATAQUE_MAX = 0.6, 0.9
+    ACELERACAO = 0.002       # por passo (60 por segundo)
     RAIO_CAPTURA = 2.0       # distância horizontal para pegar o jogador
     RAIO_PASSEIO = 120       # quão longe ele escolhe o próximo ponto de passeio
 
@@ -34,6 +39,7 @@ class Monstro:
         self.x, self.z = x, z
         self.rotacao = 0.0
         self.perseguindo = False
+        self.vel_ataque = self.VEL_ATAQUE_MIN
         self._novo_destino()
 
     def _novo_destino(self):
@@ -59,14 +65,24 @@ class Monstro:
         """alvo = posição [x, y, z] do jogador. perseguindo = jogador está na água?"""
         self.perseguindo = perseguindo
         if perseguindo:
-            self._ir_para(alvo[0], alvo[2], self.VEL_PERSEGUICAO)
+            if self.distancia(alvo) > self.DIST_ATAQUE:
+                vel = self.VEL_APROXIMACAO
+            else:
+                vel = self.vel_ataque
+                self.vel_ataque = min(self.VEL_ATAQUE_MAX, self.vel_ataque + self.ACELERACAO)
+            self._ir_para(alvo[0], alvo[2], vel)
         else:
+            self.vel_ataque = self.VEL_ATAQUE_MIN
             if self._ir_para(self.destino[0], self.destino[1], self.VEL_PASSEIO):
                 self._novo_destino()
 
+    def distancia(self, pos):
+        """Distância horizontal até pos [x, y, z]."""
+        return math.hypot(pos[0] - self.x, pos[2] - self.z)
+
     def tocou(self, pos):
         """True se o monstro encostou no jogador (pulando bem alto dá pra escapar por cima)."""
-        return (math.hypot(pos[0] - self.x, pos[2] - self.z) < self.RAIO_CAPTURA and
+        return (self.distancia(pos) < self.RAIO_CAPTURA and
                 pos[1] < self.y + self.TAMANHO)
 
     def desenhar(self):
