@@ -1,5 +1,6 @@
 import math
 import random
+from collections import deque
 
 nivel = {"facil": [80, 80, 15], "medio": [200, 150, 20], "dificil": [500, 400, 30]}
 
@@ -53,6 +54,24 @@ def _sortear_plataformas(plats, quantidade, largura):
 
 def _tem_solucao(plats, largura, alcance):
     """True se dá para ir da saída até a chegada pulando de plataforma em plataforma."""
+    return caminho_solucao(plats, largura, alcance) is not None
+
+
+def vizinhas(plats, i, alcance):
+    """Índices das plataformas que dá para alcançar com um pulo a partir da plataforma i."""
+    m = TAM_PLAT / 2
+
+    def caixa(p):
+        return (p[0] - m, p[0] + m, p[2] - m, p[2] + m)
+
+    a = caixa(plats[i])
+    return [j for j in range(len(plats))
+            if j != i and _gap(a, caixa(plats[j])) <= FOLGA_SOLUCAO * alcance]
+
+
+def caminho_solucao(plats, largura, alcance):
+    """Índices das plataformas do caminho mais curto (em pulos) até a chegada,
+    ou None se não existir caminho."""
     limite = FOLGA_SOLUCAO * alcance
     c = COMPRIMENTO_ES
     m = TAM_PLAT / 2
@@ -65,20 +84,25 @@ def _tem_solucao(plats, largura, alcance):
     for i, (x, _, z) in enumerate(plats):
         baldes.setdefault((int(x // B), int(z // B)), []).append(i)
 
-    visto = {i for i, cx in enumerate(caixas) if _gap(saida, cx) <= limite}
-    fila = list(visto)
+    # busca em largura; 'origem' guarda de onde veio, para refazer o caminho
+    origem = {i: None for i, cx in enumerate(caixas) if _gap(saida, cx) <= limite}
+    fila = deque(origem)
     while fila:
-        i = fila.pop()
+        i = fila.popleft()
         if _gap(caixas[i], chegada) <= limite:
-            return True
+            caminho = []
+            while i is not None:
+                caminho.append(i)
+                i = origem[i]
+            return caminho[::-1]
         bx, bz = int(plats[i][0] // B), int(plats[i][2] // B)
         for dx in (-1, 0, 1):
             for dz in (-1, 0, 1):
                 for j in baldes.get((bx + dx, bz + dz), ()):
-                    if j not in visto and _gap(caixas[i], caixas[j]) <= limite:
-                        visto.add(j)
+                    if j not in origem and _gap(caixas[i], caixas[j]) <= limite:
+                        origem[j] = i
                         fila.append(j)
-    return False
+    return None
 
 
 def gerar_centros_plataformas(num_plataformas, largura_chao, alcance):

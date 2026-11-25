@@ -3,13 +3,32 @@ from OpenGL.GL import *
 from texturas import usar, parar, face, faces_caixa
 
 
+LADRILHO = 25.0   # a neblina pode ser calculada por vértice: faces grandes são divididas
+
+
+def _face_dividida(a, b, c, d, escala):
+    """Retângulo a-b-c-d dividido em ladrilhos (dentro de glBegin(GL_QUADS))."""
+    def ponto(u, v):
+        return tuple(p + (q - p) * u + (r - p) * v for p, q, r in zip(a, b, d))
+
+    def fracoes(p, q):
+        comprimento = sum(abs(i - j) for i, j in zip(p, q))   # lados alinhados aos eixos
+        n = max(1, int(round(comprimento / LADRILHO)))
+        return [i / n for i in range(n + 1)]
+
+    us, vs = fracoes(a, b), fracoes(a, d)
+    for u0, u1 in zip(us, us[1:]):
+        for v0, v1 in zip(vs, vs[1:]):
+            face(ponto(u0, v0), ponto(u1, v0), ponto(u1, v1), ponto(u0, v1), escala)
+
+
 def chao(tamanho, altura):
     t = tamanho
     h = altura
     usar("terra")
     glBegin(GL_QUADS)
     glColor3f(1.0, 1.0, 1.0)
-    face((-t, h, -t), (t, h, -t), (t, h, t), (-t, h, t), 20.0)
+    _face_dividida((-t, h, -t), (t, h, -t), (t, h, t), (-t, h, t), 20.0)
     glEnd()
     parar()
 
@@ -23,24 +42,36 @@ def parede(tamanho, altura):
     # laterais
     glColor3f(0.85, 0.85, 0.85)
     for z in (-t, t):
-        face((-t, 0, z), (t, 0, z), (t, h, z), (-t, h, z), 20.0)
+        _face_dividida((-t, 0, z), (t, 0, z), (t, h, z), (-t, h, z), 20.0)
 
     # saída (-t) e entrada (+t), com um vão de 30 x 15 no meio
     glColor3f(1.0, 1.0, 1.0)
     for x in (-t, t):
-        face((x, 0, -t), (x, 0, -15), (x, h, -15), (x, h, -t), 20.0)
-        face((x, 0, t), (x, 0, 15), (x, h, 15), (x, h, t), 20.0)
+        _face_dividida((x, 0, -t), (x, 0, -15), (x, h, -15), (x, h, -t), 20.0)
+        _face_dividida((x, 0, t), (x, 0, 15), (x, h, 15), (x, h, t), 20.0)
         face((x, 15, -15), (x, 15, 15), (x, h, 15), (x, h, -15), 20.0)
 
     glEnd()
     parar()
 
 
-def agua(tamanho, altura, tempo):
-    """Superfície translúcida e em movimento. Desenhar depois do que é opaco.
+def compilar_agua(tamanho, altura):
+    """Superfície da água numa display list.
     (As laterais não são desenhadas: ficariam no mesmo plano dos muros.)"""
     t = tamanho
     h = altura
+    lista = glGenLists(1)
+    glNewList(lista, GL_COMPILE)
+    glBegin(GL_QUADS)
+    glColor4f(1.0, 1.0, 1.0, 0.8)
+    _face_dividida((-t, h, -t), (t, h, -t), (t, h, t), (-t, h, t), 25.0)
+    glEnd()
+    glEndList()
+    return lista
+
+
+def agua(lista, tempo):
+    """Superfície translúcida e em movimento. Desenhar depois do que é opaco."""
     usar("agua")
     glEnable(GL_BLEND)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
@@ -51,10 +82,7 @@ def agua(tamanho, altura, tempo):
     glTranslatef(tempo * 0.03 % 1.0, tempo * 0.02 % 1.0, 0.0)
     glMatrixMode(GL_MODELVIEW)
 
-    glBegin(GL_QUADS)
-    glColor4f(1.0, 1.0, 1.0, 0.8)
-    face((-t, h, -t), (t, h, -t), (t, h, t), (-t, h, t), 25.0)
-    glEnd()
+    glCallList(lista)
 
     glMatrixMode(GL_TEXTURE)
     glLoadIdentity()
@@ -117,18 +145,19 @@ def caixa_entrada_saida(largura_chao):
     parar()
 
 
-def plataforma(centro, largura, comprimento, altura):
+def plataforma(centro, largura, comprimento, altura, cor=(1.0, 1.0, 1.0)):
     (x, y, z) = centro
     l = largura / 2
     c = comprimento / 2
     glBegin(GL_QUADS)
-    faces_caixa(x - l, x + l, y, y + altura, z - c, z + c, (1.0, 1.0, 1.0),
+    faces_caixa(x - l, x + l, y, y + altura, z - c, z + c, cor,
                 tons=(0.75, 1.0, 0.65))
     glEnd()
 
 
-def compilar_cenario(centros, tamanho, altura_chao, altura_muro, tam_plat, altura_plat):
-    """Grava o cenário fixo numa display list: fica na placa de vídeo e é desenhado
+def compilar_cenario(plataformas, tamanho, altura_chao, altura_muro, tam_plat, altura_plat):
+    """plataformas: lista de (centro, cor) das que não se mexem.
+    Grava o cenário fixo numa display list: fica na placa de vídeo e é desenhado
     com uma única chamada por frame (glCallList)."""
     lista = glGenLists(1)
     glNewList(lista, GL_COMPILE)
@@ -137,8 +166,8 @@ def compilar_cenario(centros, tamanho, altura_chao, altura_muro, tam_plat, altur
     caixa_entrada_saida(tamanho)
     plataforma_entrada_saida(tamanho)
     usar("madeira")
-    for centro in centros:
-        plataforma(centro, tam_plat, tam_plat, altura_plat)
+    for centro, cor in plataformas:
+        plataforma(centro, tam_plat, tam_plat, altura_plat, cor)
     parar()
     glEndList()
     return lista

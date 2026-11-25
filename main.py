@@ -8,6 +8,8 @@ from texturas import carregar_texturas, usar, parar, face
 from gerador import *
 from colisao import *
 from monstro import Monstro
+from plataformas import Plataformas, MULT_IMPULSO
+from cristais import Cristais, escolher_lugares
 
 TAMANHO_CHAO = 500
 ALTURA_CHAO = 1
@@ -46,7 +48,8 @@ inclinacao = 0.0           # positivo = olhando para cima
 primeira_pessoa = True     # a tecla V alterna a câmera
 ultimo_x = None
 ultimo_y = None
-item = False
+cristais = None            # criados em main()
+estado = "jogando"         # "jogando", "morreu" ou "venceu"
 pulou = False
 pausado = False
 no_agua = False   
@@ -193,7 +196,7 @@ def mouse_movimento(window, x, y):
         inclinacao = max(-LIMITE_PITCH, min(LIMITE_PITCH, inclinacao))
 
 
-def teclado_movimentacao(window, caixas):
+def teclado_movimentacao(window, caixas, impulso=False):
     global velocidade_y, pulou, no_agua, fase_passo, forca_passo
 
     x_anterior, z_anterior = posicao[0], posicao[2]
@@ -234,7 +237,7 @@ def teclado_movimentacao(window, caixas):
 
     # --- pulo ---
     if glfw.get_key(window, glfw.KEY_SPACE) == glfw.PRESS and not pulou:
-        velocidade_y = VEL_PULO
+        velocidade_y = VEL_PULO * (MULT_IMPULSO if impulso else 1.0)
         pulou = True
 
     # --- gravidade + pouso (chão ou topo de plataforma) ---
@@ -267,7 +270,7 @@ def chegou():
             posicao[1] >= ALTURA_PLAT_ES - 0.01)
 
 
-def reiniciar(monstro):
+def reiniciar(monstro, plataformas):
     global velocidade_y, pulou, no_agua, rotacao, inclinacao, ultimo_x, ultimo_y
     global fase_passo, forca_passo
     posicao[:] = PONTO_INICIAL
@@ -282,20 +285,18 @@ def reiniciar(monstro):
     ultimo_x = None
     ultimo_y = None
     monstro.reposicionar(longe_de=posicao)
+    plataformas.reiniciar()
 
 
 def mouse_item(window, mouse, action, mods):
-    global item
-    if pausado or action != glfw.PRESS:
+    """Clique esquerdo: pega o cristal que estiver perto."""
+    if pausado or estado != "jogando" or action != glfw.PRESS:
         return
 
-    if mouse == glfw.MOUSE_BUTTON_LEFT and item == False:
-        item = True
-        print("Pegou o item!")
-
-    elif mouse == glfw.MOUSE_BUTTON_LEFT and item == True:
-        item = False
-        print("Soltou o item!")
+    if mouse == glfw.MOUSE_BUTTON_LEFT and cristais.coletar(posicao):
+        print("Cristal %d de %d!" % (sum(cristais.coletados), len(cristais.coletados)))
+        if cristais.completos:
+            print("O portal da chegada abriu!")
 
 
 def camera_rotacao():
@@ -325,6 +326,7 @@ def camera_movimentacao(tempo, perigo):
 
 
 def main():
+    global cristais, estado
     if not glfw.init():
         return
 
@@ -348,18 +350,26 @@ def main():
     centros_plataformas = gerar_centros_plataformas(500, TAMANHO_CHAO, alcance)
     caixas = criar_caixas(centros_plataformas, TAMANHO_CHAO)   # caixas de colisão
 
+    # cristais e caminho garantido ficam em plataformas normais; o resto pode ser especial
+    lugares, protegidas = escolher_lugares(centros_plataformas, TAMANHO_CHAO, alcance)
+    cristais = Cristais([centros_plataformas[i] for i in lugares])
+    plataformas = Plataformas(centros_plataformas, protegidas, caixas, TAMANHO_CHAO)
+
     carregar_texturas()
-    cenario = compilar_cenario(centros_plataformas, TAMANHO_CHAO, ALTURA_CHAO, 50,
+    plataformas.compilar()
+    cenario = compilar_cenario(plataformas.fixas(),TAMANHO_CHAO, ALTURA_CHAO, 50,
                                TAMANHO_PLATAFORMA, ALTURA_PLATAFORMA)
+    lista_agua = compilar_agua(TAMANHO_CHAO, ALTURA_AGUA)
     ceu = compilar_ceu()
     tempo_jogo = 0.0        # só avança fora da pausa
     acumulado = 0.0         # tempo ainda não simulado pela física
     ultimo_tempo = glfw.get_time()
 
     monstro = Monstro(TAMANHO_CHAO, ALTURA_CHAO, longe_de=posicao)
-    reiniciar(monstro)
+    reiniciar(monstro, plataformas)
 
-    estado = "jogando"      # "jogando", "morreu" ou "venceu"
+    estado = "jogando"
+    f = 1.0                 # fração entre o passo anterior e o atual
     tempo_fim = 0.0
 
     while not glfw.window_should_close(window):
@@ -380,7 +390,8 @@ def main():
                 if estado != "jogando":
                     continue
                 pos_anterior[:] = posicao
-                teclado_movimentacao(window, caixas)
+                plataformas.atualizar(posicao)
+                teclado_movimentacao(window, caixas, plataformas.impulso_pronto)
                 monstro.atualizar(posicao, no_agua)
 
                 if no_agua and monstro.tocou(posicao):
@@ -388,7 +399,7 @@ def main():
                     tempo_fim = glfw.get_time()
                     glfw.set_window_title(window, "Paisagem OpenGL - O MONSTRO PEGOU VOCÊ!")
                     print("Você morreu! O monstro te pegou na água.")
-                elif chegou():
+                elif chegou() and cristais.completos:
                     estado = "venceu"
                     tempo_fim = glfw.get_time()
                     glfw.set_window_title(window, "Paisagem OpenGL - VOCÊ VENCEU!")
@@ -396,7 +407,9 @@ def main():
 
             # mostra o resultado por 2.5s e recomeça
             if estado != "jogando" and glfw.get_time() - tempo_fim > 2.5:
-                reiniciar(monstro)
+                if estado == "venceu":
+                    cristais.reiniciar()   # ao morrer, os cristais já pegos são mantidos
+                reiniciar(monstro, plataformas)
                 estado = "jogando"
                 glfw.set_window_title(window, "Paisagem OpenGL")
 
@@ -433,12 +446,21 @@ def main():
 
         glCallList(cenario)   # chão, muros e plataformas
 
+        plataformas.desenhar(pos_visual, f)
+        cristais.desenhar(tempo_jogo)
+
         monstro.desenhar()
         if not primeira_pessoa:   # em primeira pessoa a câmera está dentro dele
             boneco()
 
-        agua(TAMANHO_CHAO, ALTURA_AGUA, tempo_jogo)   # translúcida: depois do que é opaco
+        agua(lista_agua, tempo_jogo)  # translúcida: depois do que é opaco
         desligar_neblina()
+        cristais.desenhar_luzes(pos_visual, TAMANHO_CHAO, tempo_jogo)
+
+        _tela_2d_inicio()
+        cristais.desenhar_hud(aspecto, piscar=chegou() and not cristais.completos
+                              and tempo_jogo % 0.6 < 0.3)
+        _tela_2d_fim()
 
         if primeira_pessoa and estado == "jogando" and not pausado:
             mira(aspecto)
