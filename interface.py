@@ -139,7 +139,7 @@ def tela_menu(aspecto, opcoes, escolhida, recordes, tempo):
             texto("RECORDE " + formatar_tempo(recordes[opcao]), aspecto - 0.1, y + 0.02, 0.042,
                   VERDE, alinhar="direita")
 
-    texto("WASD ANDAR   ESPAÇO PULAR   CLIQUE PEGAR CRISTAL   V CÂMERA   TAB MAPA   ESC PAUSA",
+    texto("WASD ANDAR   ESPAÇO PULAR   CLIQUE PEGAR CRISTAL   V CÂMERA   TAB MAPA   N SOM   ESC PAUSA",
           0, -0.82, 0.036, CINZA)
     texto("SETAS OU MOUSE PARA ESCOLHER, ENTER PARA CONFIRMAR", 0, -0.91, 0.036, CINZA)
 

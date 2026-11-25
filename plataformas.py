@@ -11,6 +11,7 @@ from ambiente import plataforma
 from colisao import (TAMANHO_PLATAFORMA, ALTURA_PLATAFORMA, METADE_BONECO, _sobrepoe,
                      colide_lateral)
 from texturas import usar, parar
+import som
 
 NORMAL, MOVEL, AFUNDA, QUEBRA, IMPULSO = "normal", "movel", "afunda", "quebra", "impulso"
 CHANCES = [(MOVEL, 0.12), (AFUNDA, 0.12), (QUEBRA, 0.12), (IMPULSO, 0.06)]
@@ -158,8 +159,11 @@ class Plataformas:
         if p.contador == 0:
             if self._em_cima(i, pos):
                 p.contador = 1
+                som.tocar("estalo")
             return
         p.contador += 1
+        if p.contador == PASSOS_QUEBRAR + 1:
+            som.tocar("quebra")
         if p.contador > PASSOS_QUEBRAR + PASSOS_VOLTAR:
             original = (p.x0 - _M, p.x0 + _M, p.z0 - _M, p.z0 + _M, p.topo)
             if _sobrepoe(pos[0], pos[2], original) and pos[1] < p.topo:

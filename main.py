@@ -12,6 +12,7 @@ from plataformas import Plataformas, MULT_IMPULSO
 from cristais import Cristais, escolher_lugares
 from dificuldade import DIFICULDADES, ler_recordes, salvar_tempo
 import interface as ui
+import som
 from minimapa import compilar_minimapa, desenhar_minimapa
 
 TAMANHO_CHAO = 500
@@ -98,8 +99,9 @@ def mouse_movimento(window, x, y):
     global rotacao, inclinacao, ultimo_x, ultimo_y, opcao_menu
     if estado == "menu":
         i = ui.opcao_no_ponto(*ponto_na_tela(window, x, y), len(OPCOES))
-        if i is not None:
+        if i is not None and i != opcao_menu:
             opcao_menu = i
+            som.tocar("menu")
         return
     if pausado or estado == "venceu":
         return
@@ -161,6 +163,7 @@ def teclado_movimentacao(window, caixas, impulso=False):
     if glfw.get_key(window, glfw.KEY_SPACE) == glfw.PRESS and not pulou:
         velocidade_y = VEL_PULO * (MULT_IMPULSO if impulso else 1.0)
         pulou = True
+        som.tocar("impulso" if impulso else "pulo")
 
     # --- gravidade + pouso (chão ou topo de plataforma) ---
     y_anterior = posicao[1]
@@ -170,6 +173,11 @@ def teclado_movimentacao(window, caixas, impulso=False):
     if velocidade_y <= 0:   # só pousa quando está caindo
         suporte = altura_suporte(posicao[0], posicao[2], y_anterior, caixas, ALTURA_CHAO)
         if y_novo <= suporte:
+            caiu = velocidade_y < -0.4
+            if suporte == ALTURA_CHAO and (caiu or not no_agua):
+                som.tocar("mergulho")
+            elif caiu:
+                som.tocar("pouso")
             y_novo = suporte
             velocidade_y = 0.0
             pulou = False
@@ -182,7 +190,10 @@ def teclado_movimentacao(window, caixas, impulso=False):
     andou = math.hypot(posicao[0] - x_anterior, posicao[2] - z_anterior)
     alvo = 1.0 if andou > 0.01 and velocidade_y == 0.0 else 0.0
     forca_passo += (alvo - forca_passo) * 0.15
+    ciclo = int(fase_passo / (2 * math.pi))
     fase_passo += andou * 0.5
+    if alvo and int(fase_passo / (2 * math.pi)) != ciclo:   # um passo por balanço
+        som.tocar("passo_agua" if no_agua else "passo")
 
 
 def chegou():
@@ -318,6 +329,7 @@ def confirmar_menu(window):
         glfw.set_window_should_close(window, True)
     else:
         pedido = OPCOES[opcao_menu]
+        som.tocar("confirma")
 
 
 def tecla_callback(window, key, scancode, action, mods):
@@ -325,12 +337,18 @@ def tecla_callback(window, key, scancode, action, mods):
     if action != glfw.PRESS:
         return
 
+    if key == glfw.KEY_N:
+        avisar("SOM DESLIGADO" if som.alternar_mudo() else "SOM LIGADO", 1.5)
+        return
+
     confirma = key in (glfw.KEY_ENTER, glfw.KEY_KP_ENTER)
     if estado == "menu":
         if key in (glfw.KEY_UP, glfw.KEY_W):
             opcao_menu = (opcao_menu - 1) % len(OPCOES)
+            som.tocar("menu")
         elif key in (glfw.KEY_DOWN, glfw.KEY_S):
             opcao_menu = (opcao_menu + 1) % len(OPCOES)
+            som.tocar("menu")
         elif confirma:
             confirmar_menu(window)
         elif key == glfw.KEY_ESCAPE:
@@ -364,8 +382,10 @@ def mouse_clique(window, botao, action, mods):
         if cristais.coletar(posicao):
             if cristais.completos:
                 avisar("O PORTAL ABRIU!", 4.0)
+                som.tocar("portal")
             else:
                 avisar("CRISTAL %d DE %d" % (sum(cristais.coletados), len(cristais.coletados)))
+                som.tocar("cristal")
 
 
 def passo_jogo(window):
@@ -379,9 +399,11 @@ def passo_jogo(window):
 
     if no_agua and p.monstro.tocou(posicao):
         p.mortes += 1
+        som.tocar("morte")
         mudar_estado(window, "morreu")
     elif chegou():
         if p.cristais.completos:
+            som.tocar("vitoria")
             p.novo_recorde = salvar_tempo(p.dificuldade, p.tempo)
             p.recorde = ler_recordes().get(p.dificuldade, p.tempo)
             mudar_estado(window, "venceu")
@@ -421,12 +443,17 @@ def desenhar_menu(window, ceu, lista_agua, recordes):
     ui.fim_2d()
 
 
+def perigo_atual():
+    """0 (monstro longe ou calmo) a 1 (encostando)."""
+    if estado != "jogando" or not partida.monstro.perseguindo:
+        return 0.0
+    return max(0.0, 1.0 - partida.monstro.distancia(posicao) / TREMOR_DISTANCIA)
+
+
 def desenhar_jogo(window, ceu, lista_agua, f):
     """f: fração entre o passo anterior e o atual."""
     p = partida
-    perigo = 0.0
-    if estado == "jogando" and p.monstro.perseguindo:
-        perigo = max(0.0, 1.0 - p.monstro.distancia(posicao) / TREMOR_DISTANCIA)
+    perigo = perigo_atual()
 
     aspecto = projecao(window)
     camera_rotacao()
@@ -486,6 +513,7 @@ def main():
 
     glEnable(GL_DEPTH_TEST)
     carregar_texturas()
+    som.iniciar()
     lista_agua = compilar_agua(TAMANHO_CHAO, ALTURA_AGUA)
     ceu = compilar_ceu()
 
@@ -530,6 +558,8 @@ def main():
             if estado == "venceu":
                 recordes = ler_recordes()
             tempo_morto = 0.0
+            if estado == "jogando" and no_agua:
+                som.coracao(perigo_atual(), dt)
             # desenha entre o passo anterior e o atual, para o movimento ficar suave
             f = acumulado / PASSO if estado == "jogando" else 1.0
             for i in range(3):
@@ -548,6 +578,7 @@ def main():
             desenhar_jogo(window, ceu, lista_agua, f)
         glfw.swap_buffers(window)
 
+    som.encerrar()
     glfw.terminate()
 
 
