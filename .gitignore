@@ -1,1 +1,3 @@
 recordes.json
+__pycache__/
+*.pyc
