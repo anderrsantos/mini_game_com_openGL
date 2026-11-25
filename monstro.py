@@ -2,26 +2,13 @@ import math
 import random
 from OpenGL.GL import *
 
+from texturas import usar, parar, faces_caixa
+
 
 def _caixa(x0, x1, y0, y1, z0, z1, cor):
     """Desenha uma caixa colorida, com tons diferentes por face para dar volume."""
-    r, g, b = cor
-
-    def tom(f):
-        return (min(r * f, 1.0), min(g * f, 1.0), min(b * f, 1.0))
-
     glBegin(GL_QUADS)
-    # frente (-z) e trás (+z)
-    glColor3f(*tom(1.0))
-    glVertex3f(x0, y0, z0); glVertex3f(x1, y0, z0); glVertex3f(x1, y1, z0); glVertex3f(x0, y1, z0)
-    glVertex3f(x0, y0, z1); glVertex3f(x1, y0, z1); glVertex3f(x1, y1, z1); glVertex3f(x0, y1, z1)
-    # topo
-    glColor3f(*tom(1.3))
-    glVertex3f(x0, y1, z0); glVertex3f(x1, y1, z0); glVertex3f(x1, y1, z1); glVertex3f(x0, y1, z1)
-    # laterais
-    glColor3f(*tom(0.8))
-    glVertex3f(x0, y0, z0); glVertex3f(x0, y0, z1); glVertex3f(x0, y1, z1); glVertex3f(x0, y1, z0)
-    glVertex3f(x1, y0, z0); glVertex3f(x1, y0, z1); glVertex3f(x1, y1, z1); glVertex3f(x1, y1, z0)
+    faces_caixa(x0, x1, y0, y1, z0, z1, cor, tons=(1.0, 1.3, 0.8), escala=3.0)
     glEnd()
 
 
@@ -93,14 +80,16 @@ class Monstro:
         else:
             corpo, olho = (0.3, 0.1, 0.4), (1.0, 0.9, 0.1)
 
+        usar("escamas")
         _caixa(-t, t, 0, self.TAMANHO, -t, t, corpo)
+        # espinhos no topo
+        for ex in (-1.0, 0.0, 1.0):
+            _caixa(ex - 0.25, ex + 0.25, self.TAMANHO, self.TAMANHO + 0.8, -0.25, 0.25, corpo)
+        parar()
         # olhos (lado -z)
         _caixa(-1.0, -0.4, 2.0, 2.5, -t - 0.1, -t, olho)
         _caixa(0.4, 1.0, 2.0, 2.5, -t - 0.1, -t, olho)
         # boca / dentes
         _caixa(-0.8, 0.8, 0.9, 1.4, -t - 0.1, -t, (0.95, 0.95, 0.95))
-        # espinhos no topo
-        for ex in (-1.0, 0.0, 1.0):
-            _caixa(ex - 0.25, ex + 0.25, self.TAMANHO, self.TAMANHO + 0.8, -0.25, 0.25, corpo)
 
         glPopMatrix()

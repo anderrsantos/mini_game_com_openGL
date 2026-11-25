@@ -3,19 +3,20 @@ from OpenGL.GL import *
 import math
 
 from ambiente import *
+from texturas import carregar_texturas, usar, parar, face
 from gerador import *
 from colisao import *
 from monstro import Monstro
 
 TAMANHO_CHAO = 500
 ALTURA_CHAO = 1
-ALTURA_AGUA = ALTURA_CHAO + 1.0
+ALTURA_AGUA = ALTURA_CHAO + 1
 SENSIBILIDADE = 0.15
 
 ALTURA_MURO = 30
 
 # câmera em primeira pessoa
-ALTURA_OLHOS = 1.7     # o boneco tem 2 de altura
+ALTURA_OLHOS = 4     # o boneco tem 2 de altura
 LIMITE_PITCH = 89.0    # não deixa a câmera virar de cabeça para baixo
 
 # física
@@ -45,42 +46,28 @@ def boneco():
     glTranslatef(posicao[0], posicao[1], posicao[2])
     glRotatef(rotacao, 0.0, 1.0, 0.0)   # gira o boneco
 
+    usar("tecido")
     glBegin(GL_QUADS)
 
     # FRENTE (lado -z): vermelha, mostra para onde ele olha
     glColor3f(0.9, 0.2, 0.2)
-    glVertex3f(-0.5, 0, -0.5)
-    glVertex3f(0.5, 0, -0.5)
-    glVertex3f(0.5, 2, -0.5)
-    glVertex3f(-0.5, 2, -0.5)
+    face((-0.5, 0, -0.5), (0.5, 0, -0.5), (0.5, 2, -0.5), (-0.5, 2, -0.5), 2.0)
 
     # trás
     glColor3f(0.9, 0.7, 0.5)
-    glVertex3f(-0.5, 0, 0.5)
-    glVertex3f(0.5, 0, 0.5)
-    glVertex3f(0.5, 2, 0.5)
-    glVertex3f(-0.5, 2, 0.5)
+    face((-0.5, 0, 0.5), (0.5, 0, 0.5), (0.5, 2, 0.5), (-0.5, 2, 0.5), 2.0)
 
     # topo
     glColor3f(1.0, 0.9, 0.7)
-    glVertex3f(-0.5, 2, -0.5)
-    glVertex3f(0.5, 2, -0.5)
-    glVertex3f(0.5, 2, 0.5)
-    glVertex3f(-0.5, 2, 0.5)
+    face((-0.5, 2, -0.5), (0.5, 2, -0.5), (0.5, 2, 0.5), (-0.5, 2, 0.5), 2.0)
 
     # laterais
     glColor3f(0.8, 0.6, 0.4)
-    glVertex3f(-0.5, 0, -0.5)
-    glVertex3f(-0.5, 0, 0.5)
-    glVertex3f(-0.5, 2, 0.5)
-    glVertex3f(-0.5, 2, -0.5)
-
-    glVertex3f(0.5, 0, -0.5)
-    glVertex3f(0.5, 0, 0.5)
-    glVertex3f(0.5, 2, 0.5)
-    glVertex3f(0.5, 2, -0.5)
+    for x in (-0.5, 0.5):
+        face((x, 0, -0.5), (x, 0, 0.5), (x, 2, 0.5), (x, 2, -0.5), 2.0)
 
     glEnd()
+    parar()
     glPopMatrix()
 
 
@@ -323,6 +310,12 @@ def main():
     centros_plataformas = gerar_centros_plataformas(500, TAMANHO_CHAO, alcance)
     caixas = criar_caixas(centros_plataformas, TAMANHO_CHAO)   # caixas de colisão
 
+    carregar_texturas()
+    cenario = compilar_cenario(centros_plataformas, TAMANHO_CHAO, ALTURA_CHAO, 50,
+                               TAMANHO_PLATAFORMA, ALTURA_PLATAFORMA)
+    tempo_agua = 0.0        # só avança fora da pausa
+    ultimo_tempo = glfw.get_time()
+
     monstro = Monstro(TAMANHO_CHAO, ALTURA_CHAO, longe_de=posicao)
     reiniciar(monstro)
 
@@ -331,6 +324,11 @@ def main():
 
     while not glfw.window_should_close(window):
         glfw.poll_events()
+
+        agora = glfw.get_time()
+        if not pausado:
+            tempo_agua += agora - ultimo_tempo
+        ultimo_tempo = agora
 
         if not pausado:
             if estado == "jogando":
@@ -371,21 +369,15 @@ def main():
         glLoadIdentity()
         camera_movimentacao()
 
-        chao(TAMANHO_CHAO, ALTURA_CHAO)
-        parede(TAMANHO_CHAO, 50)
-        agua(TAMANHO_CHAO, ALTURA_AGUA)
-        caixa_entrada_saida(TAMANHO_CHAO)
-        plataforma_entrada_saida(TAMANHO_CHAO)
-
-        # só desenha as plataformas próximas (mantém o FPS bom com o mapa cheio)
-        for centro in centros_plataformas:
-            if (centro[0] - posicao[0]) ** 2 + (centro[2] - posicao[2]) ** 2 < 350 ** 2:
-                plataforma(centro, TAMANHO_PLATAFORMA, TAMANHO_PLATAFORMA, ALTURA_PLATAFORMA)
+        glCallList(cenario)   # chão, muros e plataformas
 
         monstro.desenhar()
         if not primeira_pessoa:   # em primeira pessoa a câmera está dentro dele
             boneco()
-        elif estado == "jogando" and not pausado:
+
+        agua(TAMANHO_CHAO, ALTURA_AGUA, tempo_agua)   # translúcida: depois do que é opaco
+
+        if primeira_pessoa and estado == "jogando" and not pausado:
             mira(aspecto)
 
         if estado == "morreu":
