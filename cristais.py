@@ -6,21 +6,21 @@ from OpenGL.GL import *
 from colisao import ALTURA_PLATAFORMA, ALTURA_PLAT_ES
 from gerador import caminho_solucao, vizinhas
 
-QUANTIDADE = 5
 ALCANCE_COLETA = 6.0       # distância horizontal
 ALTURA_COLETA = 5.0        # diferença de altura
 ALTURA_FEIXE = 60.0
 COR = (0.3, 1.0, 0.9)
 
 
-def escolher_lugares(centros, tamanho_chao, alcance):
+def escolher_lugares(centros, tamanho_chao, alcance, quantidade):
     """Retorna (índices das plataformas com cristal, índices protegidos).
     Cada cristal fica a um pulo do caminho garantido, então sempre dá para pegar todos."""
     caminho = caminho_solucao(centros, tamanho_chao, alcance) or []
     protegidas = set(caminho)
     lugares = []
-    for k in range(min(QUANTIDADE, len(caminho))):
-        no = caminho[int((k + 0.5) * len(caminho) / QUANTIDADE) if len(caminho) >= QUANTIDADE else k]
+    quantidade = min(quantidade, len(caminho))
+    for k in range(quantidade):
+        no = caminho[int((k + 0.5) * len(caminho) / quantidade)]
         opcoes = [j for j in vizinhas(centros, no, alcance)
                   if j not in caminho and j not in lugares]
         lugares.append(random.choice(opcoes) if opcoes else no)
@@ -111,10 +111,10 @@ class Cristais:
         """Losangos no canto superior esquerdo (chamar em modo 2D).
         piscar: os que faltam piscam em vermelho (chegou ao portal sem todos)."""
         h = 0.04
-        l = h * 0.6 / aspecto
+        l = h * 0.6
         total = sum(self.coletados)
         for i in range(len(self.coletados)):
-            cx, cy = -1 + 0.08 / aspecto + i * 2.8 * l, 0.92
+            cx, cy = -aspecto + 0.08 + i * 2.8 * l, 0.92
             if i < total:
                 glColor4f(COR[0], COR[1], COR[2], 1.0)
             elif piscar:

@@ -69,8 +69,9 @@ class _Plat:
 
 
 class Plataformas:
-    def __init__(self, centros, protegidas, caixas, tamanho_chao):
-        """caixas: lista de criar_caixas(); é alterada aqui conforme as plataformas mudam."""
+    def __init__(self, centros, protegidas, caixas, tamanho_chao, fator_especiais=1.0):
+        """fator_especiais: multiplica as CHANCES (dificuldade).
+        caixas: lista de criar_caixas(); é alterada aqui conforme as plataformas mudam."""
         self.caixas = caixas
         self.tamanho_chao = tamanho_chao
         self.plats = [_Plat(c) for c in centros]
@@ -82,6 +83,7 @@ class Plataformas:
                 continue
             sorteio = random.random()
             for tipo, chance in CHANCES:
+                chance *= fator_especiais
                 if sorteio < chance:
                     if tipo != MOVEL or self._preparar_movel(i, ocupado):
                         p.tipo = tipo
@@ -178,6 +180,10 @@ class Plataformas:
                        ALTURA_PLATAFORMA, CORES[tipo])
             glEndList()
             self.listas[tipo] = lista
+
+    def apagar_listas(self):
+        for lista in self.listas.values():
+            glDeleteLists(lista, 1)
 
     def fixas(self):
         """[(centro, cor)] das que nunca mudam: vão para a display list do cenário."""

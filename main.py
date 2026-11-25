@@ -10,6 +10,9 @@ from colisao import *
 from monstro import Monstro
 from plataformas import Plataformas, MULT_IMPULSO
 from cristais import Cristais, escolher_lugares
+from dificuldade import DIFICULDADES, ler_recordes, salvar_tempo
+import interface as ui
+from minimapa import compilar_minimapa, desenhar_minimapa
 
 TAMANHO_CHAO = 500
 ALTURA_CHAO = 1
@@ -48,8 +51,13 @@ inclinacao = 0.0           # positivo = olhando para cima
 primeira_pessoa = True     # a tecla V alterna a câmera
 ultimo_x = None
 ultimo_y = None
-cristais = None            # criados em main()
-estado = "jogando"         # "jogando", "morreu" ou "venceu"
+estado = "menu"            # "menu", "jogando", "morreu" ou "venceu"
+partida = None             # Partida em andamento
+pedido = None              # dificuldade escolhida: o laço principal cria a partida
+opcao_menu = 1
+mapa_visivel = True        # a tecla TAB alterna o minimapa
+mensagem, mensagem_fim = "", 0.0
+tempo_jogo = 0.0           # relógio das animações: para na pausa
 pulou = False
 pausado = False
 no_agua = False   
@@ -85,101 +93,15 @@ def boneco():
     glPopMatrix()
 
 
-def _tela_2d_inicio():
-    glDisable(GL_DEPTH_TEST)
-    glEnable(GL_BLEND)
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-
-    glMatrixMode(GL_PROJECTION)
-    glLoadIdentity()
-    glOrtho(-1, 1, -1, 1, -1, 1)
-    glMatrixMode(GL_MODELVIEW)
-    glLoadIdentity()
-
-
-def _tela_2d_fim():
-    glDisable(GL_BLEND)
-    glEnable(GL_DEPTH_TEST)
-
-
-def _fundo(r, g, b, a):
-    glColor4f(r, g, b, a)
-    glBegin(GL_QUADS)
-    glVertex2f(-1, -1)
-    glVertex2f(1, -1)
-    glVertex2f(1, 1)
-    glVertex2f(-1, 1)
-    glEnd()
-
-
-def tela_pausa():
-    """Escurece a tela e desenha o símbolo de pausa."""
-    _tela_2d_inicio()
-    _fundo(0.0, 0.0, 0.0, 0.55)
-
-    # símbolo de pausa (duas barras)
-    glColor4f(1.0, 1.0, 1.0, 1.0)
-    glBegin(GL_QUADS)
-    glVertex2f(-0.15, -0.2)
-    glVertex2f(-0.05, -0.2)
-    glVertex2f(-0.05, 0.2)
-    glVertex2f(-0.15, 0.2)
-
-    glVertex2f(0.05, -0.2)
-    glVertex2f(0.15, -0.2)
-    glVertex2f(0.15, 0.2)
-    glVertex2f(0.05, 0.2)
-    glEnd()
-
-    _tela_2d_fim()
-
-
-def mira(aspecto):
-    """Pequena cruz no centro da tela (só em primeira pessoa)."""
-    t = 0.02
-    _tela_2d_inicio()
-    glColor4f(1.0, 1.0, 1.0, 0.8)
-    glBegin(GL_LINES)
-    glVertex2f(-t / aspecto, 0)
-    glVertex2f(t / aspecto, 0)
-    glVertex2f(0, -t)
-    glVertex2f(0, t)
-    glEnd()
-    _tela_2d_fim()
-
-
-def tela_resultado(cor):
-    """Tinge a tela de vermelho (morreu) ou verde (venceu)."""
-    _tela_2d_inicio()
-    _fundo(cor[0], cor[1], cor[2], 0.5)
-    _tela_2d_fim()
-
-
-def alternar_pausa(window):
-    global pausado, ultimo_x, ultimo_y
-    pausado = not pausado
-    if pausado:
-        glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
-        glfw.set_window_title(window, "Paisagem OpenGL - PAUSADO")
-    else:
-        glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_DISABLED)
-        glfw.set_window_title(window, "Paisagem OpenGL")
-        ultimo_x = None   # evita um "pulo" na rotação ao voltar
-        ultimo_y = None
-
-
-def tecla_callback(window, key, scancode, action, mods):
-    global primeira_pessoa
-    if key == glfw.KEY_ESCAPE and action == glfw.PRESS:
-        alternar_pausa(window)
-    elif key == glfw.KEY_V and action == glfw.PRESS and not pausado:
-        primeira_pessoa = not primeira_pessoa
-
-
 def mouse_movimento(window, x, y):
     """Mouse para a direita -> olha para a direita; para cima -> olha para cima."""
-    global rotacao, inclinacao, ultimo_x, ultimo_y
-    if pausado:
+    global rotacao, inclinacao, ultimo_x, ultimo_y, opcao_menu
+    if estado == "menu":
+        i = ui.opcao_no_ponto(*ponto_na_tela(window, x, y), len(OPCOES))
+        if i is not None:
+            opcao_menu = i
+        return
+    if pausado or estado == "venceu":
         return
     if ultimo_x is None:
         ultimo_x = x
@@ -288,17 +210,6 @@ def reiniciar(monstro, plataformas):
     plataformas.reiniciar()
 
 
-def mouse_item(window, mouse, action, mods):
-    """Clique esquerdo: pega o cristal que estiver perto."""
-    if pausado or estado != "jogando" or action != glfw.PRESS:
-        return
-
-    if mouse == glfw.MOUSE_BUTTON_LEFT and cristais.coletar(posicao):
-        print("Cristal %d de %d!" % (sum(cristais.coletados), len(cristais.coletados)))
-        if cristais.completos:
-            print("O portal da chegada abriu!")
-
-
 def camera_rotacao():
     """Só a orientação da câmera (usada também pelo céu)."""
     if primeira_pessoa:
@@ -325,8 +236,238 @@ def camera_movimentacao(tempo, perigo):
         glTranslatef(-pos_visual[0], -pos_visual[1], -pos_visual[2])  # segue o boneco
 
 
+
+
+class Partida:
+    """Um mapa sorteado, com o monstro, os cristais e as estatísticas."""
+
+    def __init__(self, dificuldade):
+        cfg = DIFICULDADES[dificuldade]
+        self.dificuldade = dificuldade
+        self.passos = 0            # passos de física jogados: é o cronômetro
+        self.mortes = 0
+        self.novo_recorde = False
+        self.recorde = 0.0
+
+        alcance = alcance_pulo(VEL_PULO, GRAVIDADE, VEL)
+        centros = gerar_centros_plataformas(cfg["plataformas"], TAMANHO_CHAO, alcance)
+        self.caixas = criar_caixas(centros, TAMANHO_CHAO)   # caixas de colisão
+
+        # cristais e caminho garantido ficam em plataformas normais; o resto pode ser especial
+        lugares, protegidas = escolher_lugares(centros, TAMANHO_CHAO, alcance, cfg["cristais"])
+        self.cristais = Cristais([centros[i] for i in lugares])
+        self.plataformas = Plataformas(centros, protegidas, self.caixas, TAMANHO_CHAO,
+                                       cfg["especiais"])
+        self.plataformas.compilar()
+        self.cenario = compilar_cenario(self.plataformas.fixas(), TAMANHO_CHAO, ALTURA_CHAO, 50,
+                                        TAMANHO_PLATAFORMA, ALTURA_PLATAFORMA)
+
+        self.minimapa = compilar_minimapa(self.plataformas.fixas(), TAMANHO_CHAO)
+
+        self.monstro = Monstro(TAMANHO_CHAO, ALTURA_CHAO, longe_de=PONTO_INICIAL)
+        for atributo, valor in cfg["monstro"].items():
+            setattr(self.monstro, atributo, valor)
+        reiniciar(self.monstro, self.plataformas)
+
+    @property
+    def tempo(self):
+        return self.passos * PASSO
+
+    def apagar(self):
+        """Libera as display lists da placa de vídeo."""
+        glDeleteLists(self.cenario, 1)
+        glDeleteLists(self.minimapa, 1)
+        self.plataformas.apagar_listas()
+
+
+OPCOES = list(DIFICULDADES) + ["SAIR"]
+
+
+def avisar(s, segundos=2.5):
+    global mensagem, mensagem_fim
+    mensagem, mensagem_fim = s, tempo_jogo + segundos
+
+
+def ponto_na_tela(window, x, y):
+    """Converte a posição do mouse para as coordenadas da interface."""
+    largura, altura = glfw.get_window_size(window)
+    altura = max(altura, 1)
+    return (2 * x - largura) / altura, 1 - 2 * y / altura
+
+
+def mudar_estado(window, novo):
+    global estado, pausado, ultimo_x, ultimo_y
+    estado = novo
+    pausado = False
+    ultimo_x = ultimo_y = None      # evita um "pulo" na rotação ao voltar
+    livre = novo in ("menu", "venceu")
+    glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_NORMAL if livre else glfw.CURSOR_DISABLED)
+
+
+def alternar_pausa(window):
+    global pausado, ultimo_x, ultimo_y
+    pausado = not pausado
+    ultimo_x = ultimo_y = None
+    glfw.set_input_mode(window, glfw.CURSOR,
+                        glfw.CURSOR_NORMAL if pausado else glfw.CURSOR_DISABLED)
+
+
+def confirmar_menu(window):
+    global pedido
+    if OPCOES[opcao_menu] == "SAIR":
+        glfw.set_window_should_close(window, True)
+    else:
+        pedido = OPCOES[opcao_menu]
+
+
+def tecla_callback(window, key, scancode, action, mods):
+    global primeira_pessoa, opcao_menu, pedido, mapa_visivel
+    if action != glfw.PRESS:
+        return
+
+    confirma = key in (glfw.KEY_ENTER, glfw.KEY_KP_ENTER)
+    if estado == "menu":
+        if key in (glfw.KEY_UP, glfw.KEY_W):
+            opcao_menu = (opcao_menu - 1) % len(OPCOES)
+        elif key in (glfw.KEY_DOWN, glfw.KEY_S):
+            opcao_menu = (opcao_menu + 1) % len(OPCOES)
+        elif confirma:
+            confirmar_menu(window)
+        elif key == glfw.KEY_ESCAPE:
+            glfw.set_window_should_close(window, True)
+    elif estado == "venceu":
+        if key == glfw.KEY_R:
+            pedido = partida.dificuldade
+        elif confirma or key == glfw.KEY_ESCAPE:
+            mudar_estado(window, "menu")
+    elif key == glfw.KEY_ESCAPE:
+        alternar_pausa(window)
+    elif key == glfw.KEY_M and pausado:
+        mudar_estado(window, "menu")
+    elif key == glfw.KEY_V and not pausado:
+        primeira_pessoa = not primeira_pessoa
+    elif key == glfw.KEY_TAB and not pausado:
+        mapa_visivel = not mapa_visivel
+
+
+def mouse_clique(window, botao, action, mods):
+    """Menu: escolhe a opção. Jogo: pega o cristal que estiver perto."""
+    if botao != glfw.MOUSE_BUTTON_LEFT or action != glfw.PRESS:
+        return
+
+    if estado == "menu":
+        if ui.opcao_no_ponto(*ponto_na_tela(window, *glfw.get_cursor_pos(window)),
+                             len(OPCOES)) is not None:
+            confirmar_menu(window)
+    elif estado == "jogando" and not pausado:
+        cristais = partida.cristais
+        if cristais.coletar(posicao):
+            if cristais.completos:
+                avisar("O PORTAL ABRIU!", 4.0)
+            else:
+                avisar("CRISTAL %d DE %d" % (sum(cristais.coletados), len(cristais.coletados)))
+
+
+def passo_jogo(window):
+    """Um passo de física (1/60 s)."""
+    p = partida
+    p.passos += 1
+    pos_anterior[:] = posicao
+    p.plataformas.atualizar(posicao)
+    teclado_movimentacao(window, p.caixas, p.plataformas.impulso_pronto)
+    p.monstro.atualizar(posicao, no_agua)
+
+    if no_agua and p.monstro.tocou(posicao):
+        p.mortes += 1
+        mudar_estado(window, "morreu")
+    elif chegou():
+        if p.cristais.completos:
+            p.novo_recorde = salvar_tempo(p.dificuldade, p.tempo)
+            p.recorde = ler_recordes().get(p.dificuldade, p.tempo)
+            mudar_estado(window, "venceu")
+        else:
+            faltam = p.cristais.coletados.count(False)
+            avisar("FALTA 1 CRISTAL" if faltam == 1 else "FALTAM %d CRISTAIS" % faltam, 0.5)
+
+
+def projecao(window):
+    """Limpa a tela e aplica a perspectiva. Retorna o aspecto da janela."""
+    glClearColor(*COR_HORIZONTE, 1.0)
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    largura, altura = glfw.get_framebuffer_size(window)
+    glViewport(0, 0, largura, altura)
+    aspecto = max(largura, 1) / max(altura, 1)
+    near, far = 0.1, 500.0
+    topo = near * math.tan(math.radians(30))
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    glFrustum(-topo * aspecto, topo * aspecto, -topo, topo, near, far)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+    return aspecto
+
+
+def desenhar_menu(window, ceu, lista_agua, recordes):
+    aspecto = projecao(window)
+    glRotatef(tempo_jogo * 3 % 360, 0.0, 1.0, 0.0)    # paisagem girando devagar
+    desenhar_ceu(ceu, tempo_jogo)
+    ligar_neblina()
+    glTranslatef(0.0, -12.0, 0.0)
+    agua(lista_agua, tempo_jogo)
+    desligar_neblina()
+
+    ui.inicio_2d(aspecto)
+    ui.tela_menu(aspecto, OPCOES, opcao_menu, recordes, tempo_jogo)
+    ui.fim_2d()
+
+
+def desenhar_jogo(window, ceu, lista_agua, f):
+    """f: fração entre o passo anterior e o atual."""
+    p = partida
+    perigo = 0.0
+    if estado == "jogando" and p.monstro.perseguindo:
+        perigo = max(0.0, 1.0 - p.monstro.distancia(posicao) / TREMOR_DISTANCIA)
+
+    aspecto = projecao(window)
+    camera_rotacao()
+    desenhar_ceu(ceu, tempo_jogo)
+
+    glLoadIdentity()
+    camera_movimentacao(tempo_jogo, perigo)
+    ligar_neblina()
+    glCallList(p.cenario)   # chão, muros e plataformas fixas
+    p.plataformas.desenhar(pos_visual, f)
+    p.cristais.desenhar(tempo_jogo)
+    p.monstro.desenhar()
+    if not primeira_pessoa:   # em primeira pessoa a câmera está dentro dele
+        boneco()
+    agua(lista_agua, tempo_jogo)   # translúcida: depois do que é opaco
+    desligar_neblina()
+    p.cristais.desenhar_luzes(pos_visual, TAMANHO_CHAO, tempo_jogo)
+
+    ui.inicio_2d(aspecto)
+    if estado == "venceu":
+        ui.tela_vitoria(aspecto, p.dificuldade, p.tempo, p.mortes, p.novo_recorde, p.recorde)
+    else:
+        p.cristais.desenhar_hud(aspecto, piscar=chegou() and not p.cristais.completos
+                                and tempo_jogo % 0.6 < 0.3)
+        distancia = max(0, TAMANHO_CHAO - LARGURA_PLAT_ES - posicao[0])
+        alerta = estado == "jogando" and no_agua
+        ui.hud(aspecto, p.tempo, p.mortes, distancia, alerta, perigo,
+               mensagem, min(1.0, (mensagem_fim - tempo_jogo) * 2))
+        if mapa_visivel:
+            desenhar_minimapa(aspecto, p.minimapa, p, pos_visual, rotacao, TAMANHO_CHAO, tempo_jogo)
+        if estado == "morreu":
+            ui.tela_morte(aspecto)
+        if pausado:
+            ui.tela_pausa(aspecto)
+        elif primeira_pessoa and estado == "jogando":
+            ui.mira(aspecto)
+    ui.fim_2d()
+
+
 def main():
-    global cristais, estado
+    global partida, pedido, tempo_jogo, mensagem
     if not glfw.init():
         return
 
@@ -339,41 +480,38 @@ def main():
 
     glfw.make_context_current(window)
     glfw.swap_interval(1)
-    glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_DISABLED)  # prende o mouse
-    glfw.set_mouse_button_callback(window, mouse_item)
+    glfw.set_mouse_button_callback(window, mouse_clique)
     glfw.set_cursor_pos_callback(window, mouse_movimento)
     glfw.set_key_callback(window, tecla_callback)
 
     glEnable(GL_DEPTH_TEST)
-
-    alcance = alcance_pulo(VEL_PULO, GRAVIDADE, VEL)
-    centros_plataformas = gerar_centros_plataformas(500, TAMANHO_CHAO, alcance)
-    caixas = criar_caixas(centros_plataformas, TAMANHO_CHAO)   # caixas de colisão
-
-    # cristais e caminho garantido ficam em plataformas normais; o resto pode ser especial
-    lugares, protegidas = escolher_lugares(centros_plataformas, TAMANHO_CHAO, alcance)
-    cristais = Cristais([centros_plataformas[i] for i in lugares])
-    plataformas = Plataformas(centros_plataformas, protegidas, caixas, TAMANHO_CHAO)
-
     carregar_texturas()
-    plataformas.compilar()
-    cenario = compilar_cenario(plataformas.fixas(),TAMANHO_CHAO, ALTURA_CHAO, 50,
-                               TAMANHO_PLATAFORMA, ALTURA_PLATAFORMA)
     lista_agua = compilar_agua(TAMANHO_CHAO, ALTURA_AGUA)
     ceu = compilar_ceu()
-    tempo_jogo = 0.0        # só avança fora da pausa
+
+    recordes = ler_recordes()
     acumulado = 0.0         # tempo ainda não simulado pela física
-    ultimo_tempo = glfw.get_time()
-
-    monstro = Monstro(TAMANHO_CHAO, ALTURA_CHAO, longe_de=posicao)
-    reiniciar(monstro, plataformas)
-
-    estado = "jogando"
+    tempo_morto = 0.0
     f = 1.0                 # fração entre o passo anterior e o atual
-    tempo_fim = 0.0
+    ultimo_tempo = glfw.get_time()
 
     while not glfw.window_should_close(window):
         glfw.poll_events()
+
+        if pedido:
+            aspecto = projecao(window)
+            ui.inicio_2d(aspecto)
+            ui.tela_carregando(aspecto)
+            ui.fim_2d()
+            glfw.swap_buffers(window)
+            if partida:
+                partida.apagar()
+            partida = Partida(pedido)
+            pedido = None
+            acumulado = 0.0
+            mensagem = ""
+            mudar_estado(window, "jogando")
+            ultimo_tempo = glfw.get_time()
 
         agora = glfw.get_time()
         # limite: depois de uma travada, não simula tudo de uma vez
@@ -382,96 +520,32 @@ def main():
 
         if not pausado:
             tempo_jogo += dt
+
+        if estado == "jogando" and not pausado:
             acumulado += dt
-
             # física em passos fixos: mesma velocidade em 60, 144 Hz...
-            while acumulado >= PASSO:
+            while acumulado >= PASSO and estado == "jogando":
                 acumulado -= PASSO
-                if estado != "jogando":
-                    continue
-                pos_anterior[:] = posicao
-                plataformas.atualizar(posicao)
-                teclado_movimentacao(window, caixas, plataformas.impulso_pronto)
-                monstro.atualizar(posicao, no_agua)
-
-                if no_agua and monstro.tocou(posicao):
-                    estado = "morreu"
-                    tempo_fim = glfw.get_time()
-                    glfw.set_window_title(window, "Paisagem OpenGL - O MONSTRO PEGOU VOCÊ!")
-                    print("Você morreu! O monstro te pegou na água.")
-                elif chegou() and cristais.completos:
-                    estado = "venceu"
-                    tempo_fim = glfw.get_time()
-                    glfw.set_window_title(window, "Paisagem OpenGL - VOCÊ VENCEU!")
-                    print("Você chegou ao final! Parabéns!")
-
-            # mostra o resultado por 2.5s e recomeça
-            if estado != "jogando" and glfw.get_time() - tempo_fim > 2.5:
-                if estado == "venceu":
-                    cristais.reiniciar()   # ao morrer, os cristais já pegos são mantidos
-                reiniciar(monstro, plataformas)
-                estado = "jogando"
-                glfw.set_window_title(window, "Paisagem OpenGL")
-
+                passo_jogo(window)
+            if estado == "venceu":
+                recordes = ler_recordes()
+            tempo_morto = 0.0
             # desenha entre o passo anterior e o atual, para o movimento ficar suave
             f = acumulado / PASSO if estado == "jogando" else 1.0
             for i in range(3):
                 pos_visual[i] = pos_anterior[i] + (posicao[i] - pos_anterior[i]) * f
+        elif estado == "morreu" and not pausado:
+            # mostra a tela por 2.5s e recomeça no mesmo mapa, com os cristais já pegos
+            tempo_morto += dt
+            if tempo_morto > 2.5:
+                reiniciar(partida.monstro, partida.plataformas)
+                acumulado = 0.0
+                mudar_estado(window, "jogando")
 
-        perigo = 0.0
-        if estado == "jogando" and monstro.perseguindo:
-            perigo = max(0.0, 1.0 - monstro.distancia(posicao) / TREMOR_DISTANCIA)
-
-        glClearColor(*COR_HORIZONTE, 1.0)
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-
-        # projeção em perspectiva
-        largura, altura = glfw.get_framebuffer_size(window)
-        glViewport(0, 0, largura, altura)
-        aspecto = largura / max(altura, 1)
-        near, far = 0.1, 500.0
-        topo = near * math.tan(math.radians(30))
-        glMatrixMode(GL_PROJECTION)
-        glLoadIdentity()
-        glFrustum(-topo * aspecto, topo * aspecto, -topo, topo, near, far)
-
-        glMatrixMode(GL_MODELVIEW)
-        glLoadIdentity()
-        camera_rotacao()
-        desenhar_ceu(ceu, tempo_jogo)
-
-        glLoadIdentity()
-        camera_movimentacao(tempo_jogo, perigo)
-        ligar_neblina()
-
-        glCallList(cenario)   # chão, muros e plataformas
-
-        plataformas.desenhar(pos_visual, f)
-        cristais.desenhar(tempo_jogo)
-
-        monstro.desenhar()
-        if not primeira_pessoa:   # em primeira pessoa a câmera está dentro dele
-            boneco()
-
-        agua(lista_agua, tempo_jogo)  # translúcida: depois do que é opaco
-        desligar_neblina()
-        cristais.desenhar_luzes(pos_visual, TAMANHO_CHAO, tempo_jogo)
-
-        _tela_2d_inicio()
-        cristais.desenhar_hud(aspecto, piscar=chegou() and not cristais.completos
-                              and tempo_jogo % 0.6 < 0.3)
-        _tela_2d_fim()
-
-        if primeira_pessoa and estado == "jogando" and not pausado:
-            mira(aspecto)
-
-        if estado == "morreu":
-            tela_resultado((0.8, 0.0, 0.0))
-        elif estado == "venceu":
-            tela_resultado((0.0, 0.7, 0.1))
-        elif pausado:
-            tela_pausa()
-
+        if estado == "menu":
+            desenhar_menu(window, ceu, lista_agua, recordes)
+        else:
+            desenhar_jogo(window, ceu, lista_agua, f)
         glfw.swap_buffers(window)
 
     glfw.terminate()
