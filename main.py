@@ -13,6 +13,8 @@ from cristais import Cristais, escolher_lugares
 from dificuldade import DIFICULDADES, ler_recordes, salvar_tempo
 import interface as ui
 import som
+from agua import Agua
+from iluminacao import ligar_luz, desligar_luz, sombra
 from minimapa import compilar_minimapa, desenhar_minimapa
 
 TAMANHO_CHAO = 500
@@ -74,11 +76,13 @@ def boneco():
 
     # FRENTE (lado -z): vermelha, mostra para onde ele olha
     glColor3f(0.9, 0.2, 0.2)
-    face((-0.5, 0, -0.5), (0.5, 0, -0.5), (0.5, 2, -0.5), (-0.5, 2, -0.5), 2.0)
+    face((-0.5, 0, -0.5), (0.5, 0, -0.5), (0.5, 2, -0.5), (-0.5, 2, -0.5), 2.0,
+         (0.0, 0.0, -1.0))
 
     # trás
     glColor3f(0.9, 0.7, 0.5)
-    face((-0.5, 0, 0.5), (0.5, 0, 0.5), (0.5, 2, 0.5), (-0.5, 2, 0.5), 2.0)
+    face((-0.5, 0, 0.5), (0.5, 0, 0.5), (0.5, 2, 0.5), (-0.5, 2, 0.5), 2.0,
+         (0.0, 0.0, 1.0))
 
     # topo
     glColor3f(1.0, 0.9, 0.7)
@@ -87,7 +91,8 @@ def boneco():
     # laterais
     glColor3f(0.8, 0.6, 0.4)
     for x in (-0.5, 0.5):
-        face((x, 0, -0.5), (x, 0, 0.5), (x, 2, 0.5), (x, 2, -0.5), 2.0)
+        face((x, 0, -0.5), (x, 0, 0.5), (x, 2, 0.5), (x, 2, -0.5), 2.0,
+             (2 * x, 0.0, 0.0))
 
     glEnd()
     parar()
@@ -429,13 +434,13 @@ def projecao(window):
     return aspecto
 
 
-def desenhar_menu(window, ceu, lista_agua, recordes):
+def desenhar_menu(window, ceu, mar, recordes):
     aspecto = projecao(window)
     glRotatef(tempo_jogo * 3 % 360, 0.0, 1.0, 0.0)    # paisagem girando devagar
     desenhar_ceu(ceu, tempo_jogo)
     ligar_neblina()
     glTranslatef(0.0, -12.0, 0.0)
-    agua(lista_agua, tempo_jogo)
+    mar.desenhar(tempo_jogo, (0.0, 12.0, 0.0))
     desligar_neblina()
 
     ui.inicio_2d(aspecto)
@@ -450,7 +455,36 @@ def perigo_atual():
     return max(0.0, 1.0 - partida.monstro.distancia(posicao) / TREMOR_DISTANCIA)
 
 
-def desenhar_jogo(window, ceu, lista_agua, f):
+def posicao_camera():
+    """Posição da câmera no mundo (a mesma de camera_movimentacao, sem o tremor)."""
+    if primeira_pessoa:
+        return (pos_visual[0], pos_visual[1] + ALTURA_OLHOS, pos_visual[2])
+    # inversa de: translada (0, -3, -12), inclina 25 graus, gira
+    e, ang = math.radians(25), math.radians(rotacao)
+    y = 3.0 * math.cos(e) + 12.0 * math.sin(e)
+    tras = 12.0 * math.cos(e) - 3.0 * math.sin(e)
+    return (pos_visual[0] + tras * math.sin(ang), pos_visual[1] + y,
+            pos_visual[2] + tras * math.cos(ang))
+
+
+def desenhar_sombras(mar):
+    """Sombras do jogador (onde ele vai pousar) e do monstro (na água)."""
+    x, y, z = pos_visual
+    suporte = altura_suporte(x, z, y, partida.caixas, ALTURA_CHAO)
+    nivel_agua = mar.altura(x, z, tempo_jogo)
+    if suporte > nivel_agua:
+        base = suporte + 0.03
+    else:
+        base = nivel_agua + 0.08
+    altura = y - base
+    if altura > -0.5:      # dentro da água não tem sombra
+        sombra(x, base, z, 0.9 + 0.05 * max(0.0, altura), max(0.25, 0.65 - 0.03 * altura))
+
+    m = partida.monstro
+    sombra(m.x, mar.altura(m.x, m.z, tempo_jogo) + 0.12, m.z, m.TAMANHO, 0.5)
+
+
+def desenhar_jogo(window, ceu, mar, f):
     """f: fração entre o passo anterior e o atual."""
     p = partida
     perigo = perigo_atual()
@@ -462,13 +496,16 @@ def desenhar_jogo(window, ceu, lista_agua, f):
     glLoadIdentity()
     camera_movimentacao(tempo_jogo, perigo)
     ligar_neblina()
+    ligar_luz()
     glCallList(p.cenario)   # chão, muros e plataformas fixas
     p.plataformas.desenhar(pos_visual, f)
-    p.cristais.desenhar(tempo_jogo)
     p.monstro.desenhar()
     if not primeira_pessoa:   # em primeira pessoa a câmera está dentro dele
         boneco()
-    agua(lista_agua, tempo_jogo)   # translúcida: depois do que é opaco
+    desligar_luz()
+    p.cristais.desenhar(tempo_jogo)   # brilham: não recebem luz nem sombra
+    mar.desenhar(tempo_jogo, posicao_camera())   # translúcido: depois do que é opaco
+    desenhar_sombras(mar)
     desligar_neblina()
     p.cristais.desenhar_luzes(pos_visual, TAMANHO_CHAO, tempo_jogo)
 
@@ -514,7 +551,7 @@ def main():
     glEnable(GL_DEPTH_TEST)
     carregar_texturas()
     som.iniciar()
-    lista_agua = compilar_agua(TAMANHO_CHAO, ALTURA_AGUA)
+    mar = Agua(TAMANHO_CHAO, ALTURA_AGUA)
     ceu = compilar_ceu()
 
     recordes = ler_recordes()
@@ -573,9 +610,9 @@ def main():
                 mudar_estado(window, "jogando")
 
         if estado == "menu":
-            desenhar_menu(window, ceu, lista_agua, recordes)
+            desenhar_menu(window, ceu, mar, recordes)
         else:
-            desenhar_jogo(window, ceu, lista_agua, f)
+            desenhar_jogo(window, ceu, mar, f)
         glfw.swap_buffers(window)
 
     som.encerrar()

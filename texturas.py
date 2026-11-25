@@ -145,16 +145,21 @@ def parar():
     glDisable(GL_TEXTURE_2D)
 
 
-def face(a, b, c, d, escala=10.0):
+def face(a, b, c, d, escala=10.0, normal=None):
     """Um quadrado (dentro de glBegin(GL_QUADS)). As coordenadas de textura vêm da própria
-    posição: a imagem se repete a cada 'escala' unidades, sem esticar."""
+    posição: a imagem se repete a cada 'escala' unidades, sem esticar.
+    Sem 'normal', horizontais apontam para cima e paredes para o centro do mapa."""
     pontos = (a, b, c, d)
     if a[1] == b[1] == c[1] == d[1]:
         u, v = 0, 2        # horizontal (topo/fundo): x e z
+        padrao = (0.0, 1.0, 0.0)
     elif a[0] == b[0] == c[0] == d[0]:
         u, v = 2, 1        # parede em x: z e y
+        padrao = (-1.0 if a[0] > 0 else 1.0, 0.0, 0.0)
     else:
         u, v = 0, 1        # parede em z: x e y
+        padrao = (0.0, 0.0, -1.0 if a[2] > 0 else 1.0)
+    glNormal3f(*(normal or padrao))
     for p in pontos:
         glTexCoord2f(p[u] / escala, p[v] / escala)
         glVertex3f(*p)
@@ -166,10 +171,10 @@ def faces_caixa(x0, x1, y0, y1, z0, z1, cor, tons=(1.0, 1.0, 0.8), escala=10.0):
         glColor3f(*[min(c * f, 1.0) for c in cor])
 
     pintar(tons[0])
-    for z in (z0, z1):
-        face((x0, y0, z), (x1, y0, z), (x1, y1, z), (x0, y1, z), escala)
+    for z, n in ((z0, -1.0), (z1, 1.0)):
+        face((x0, y0, z), (x1, y0, z), (x1, y1, z), (x0, y1, z), escala, (0.0, 0.0, n))
     pintar(tons[1])
     face((x0, y1, z0), (x1, y1, z0), (x1, y1, z1), (x0, y1, z1), escala)
     pintar(tons[2])
-    for x in (x0, x1):
-        face((x, y0, z0), (x, y0, z1), (x, y1, z1), (x, y1, z0), escala)
+    for x, n in ((x0, -1.0), (x1, 1.0)):
+        face((x, y0, z0), (x, y0, z1), (x, y1, z1), (x, y1, z0), escala, (n, 0.0, 0.0))

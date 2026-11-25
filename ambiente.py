@@ -110,7 +110,8 @@ def plataforma_entrada_saida(largura_chao):
         face((x1, 0, -comprimento), (x1, 0, comprimento),
              (x1, altura, comprimento), (x1, altura, -comprimento))
         for z in (-comprimento, comprimento):
-            face((x0, 0, z), (x1, 0, z), (x1, altura, z), (x0, altura, z))
+            face((x0, 0, z), (x1, 0, z), (x1, altura, z), (x0, altura, z),
+                 normal=(0.0, 0.0, 1.0 if z > 0 else -1.0))
     glEnd()
     parar()
 
@@ -130,7 +131,7 @@ def caixa_entrada_saida(largura_chao):
         # teto
         glColor3f(0.7, 0.7, 0.7)
         face((x1, altura, -comprimento), (x1, altura, comprimento),
-             (x0, altura, comprimento), (x0, altura, -comprimento))
+             (x0, altura, comprimento), (x0, altura, -comprimento), normal=(0.0, -1.0, 0.0))
         # laterais
         glColor3f(0.85, 0.85, 0.85)
         face((x1, altura_piso, -comprimento), (x1, altura_piso, comprimento),
@@ -151,7 +152,7 @@ def plataforma(centro, largura, comprimento, altura, cor=(1.0, 1.0, 1.0)):
     c = comprimento / 2
     glBegin(GL_QUADS)
     faces_caixa(x - l, x + l, y, y + altura, z - c, z + c, cor,
-                tons=(0.75, 1.0, 0.65))
+                tons=(1.0, 1.0, 1.0))   # quem escurece os lados é a luz
     glEnd()
 
 

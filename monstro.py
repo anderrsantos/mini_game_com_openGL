@@ -8,7 +8,7 @@ from texturas import usar, parar, faces_caixa
 def _caixa(x0, x1, y0, y1, z0, z1, cor):
     """Desenha uma caixa colorida, com tons diferentes por face para dar volume."""
     glBegin(GL_QUADS)
-    faces_caixa(x0, x1, y0, y1, z0, z1, cor, tons=(1.0, 1.3, 0.8), escala=3.0)
+    faces_caixa(x0, x1, y0, y1, z0, z1, cor, tons=(1.0, 1.0, 1.0), escala=3.0)
     glEnd()
 
 
